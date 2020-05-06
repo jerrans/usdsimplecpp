@@ -1,0 +1,9 @@
+[submodule "submodules/usd"]
+	path = submodules/usd
+	url = https://github.com/pixaranimationstudios/usd
+[submodule "submodules/glfw"]
+	path = submodules/glfw
+	url = https://github.com/glfw/glfw
+[submodule "submodules/glm"]
+	path = submodules/glm
+	url = https://github.com/g-truc/glm
