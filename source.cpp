@@ -13,7 +13,7 @@
 
 #include <iostream>
 
-pxr::UsdGeomMesh createMesh(pxr::UsdStageRefPtr stage, const std::string &meshName, pxr::VtVec3fArray &points, pxr::VtArray<int> &faceVertexCounts, pxr::VtArray<int> &faceVertexIndices)
+pxr::UsdGeomMesh createMesh(pxr::UsdStageRefPtr stage, const std::string &meshName, pxr::VtVec3fArray &points, pxr::VtArray<int> &faceVertexCounts, pxr::VtArray<int> &faceVertexIndices, pxr::VtVec3fArray& normals)
 {
     // find the geometric extents of the mesh
     pxr::VtVec3fArray extent(2);
@@ -32,6 +32,7 @@ pxr::UsdGeomMesh createMesh(pxr::UsdStageRefPtr stage, const std::string &meshNa
     auto mesh = pxr::UsdGeomMesh::Define(stage, pxr::SdfPath("/" + meshName));
 
     mesh.GetPointsAttr().Set(points);
+    mesh.GetNormalsAttr().Set(normals);
     mesh.GetFaceVertexCountsAttr().Set(faceVertexCounts);
     mesh.GetFaceVertexIndicesAttr().Set(faceVertexIndices);
 
@@ -43,9 +44,9 @@ pxr::UsdGeomMesh createMesh(pxr::UsdStageRefPtr stage, const std::string &meshNa
     return mesh;
 }
 
-pxr::UsdGeomMesh createMesh(pxr::UsdStageRefPtr stage, const std::string &primName, pxr::VtVec3fArray &points, pxr::VtArray<int> &faceVertexCounts, pxr::VtArray<int> &faceVertexIndices, pxr::VtVec2fArray &texCoordArray)
+pxr::UsdGeomMesh createMesh(pxr::UsdStageRefPtr stage, const std::string &primName, pxr::VtVec3fArray &points, pxr::VtArray<int> &faceVertexCounts, pxr::VtArray<int> &faceVertexIndices, pxr::VtVec2fArray &texCoordArray, pxr::VtVec3fArray &normals)
 {
-    auto mesh = createMesh(stage, primName, points, faceVertexCounts, faceVertexIndices);
+    auto mesh = createMesh(stage, primName, points, faceVertexCounts, faceVertexIndices, normals);
 
     // add a new primvar for texture coordinates that we can reference in the shader
     auto texCoords = mesh.CreatePrimvar(pxr::TfToken("st"), pxr::SdfValueTypeNames->TexCoord2fArray, pxr::UsdGeomTokens->varying);
@@ -72,7 +73,7 @@ pxr::UsdShadeShader createPBRShader(pxr::UsdStageRefPtr stage, pxr::UsdGeomMesh 
     pbrShader.CreateInput(pxr::TfToken("metallic"), pxr::SdfValueTypeNames->Float).Set(metallic);
 
     // connect the pbr shader to the material
-    material.CreateSurfaceOutput().ConnectToSource(pbrShader, pxr::TfToken("surface"));
+    material.CreateSurfaceOutput().ConnectToSource(pbrShader.ConnectableAPI(), pxr::TfToken("surface"));
 
     // bind material to the mesh
     pxr::UsdShadeMaterialBindingAPI(mesh).Bind(material);
@@ -80,7 +81,7 @@ pxr::UsdShadeShader createPBRShader(pxr::UsdStageRefPtr stage, pxr::UsdGeomMesh 
     if( textureFile.empty() ) // texturing?
     {
         // if not then just set a red material
-        auto clr = pxr::GfVec3f(1.0f, 0.0f, 0.0f);
+        auto clr = pxr::GfVec3f(1.0f, 1.0f, 1.0f);
         pbrShader.CreateInput(pxr::TfToken("diffuseColor"), pxr::SdfValueTypeNames->Color3f).Set(clr);
     }else{
         // first create the reader
@@ -93,14 +94,14 @@ pxr::UsdShadeShader createPBRShader(pxr::UsdStageRefPtr stage, pxr::UsdGeomMesh 
         auto diffuseTextureSampler = pxr::UsdShadeShader::Define(stage, diffuseTextureSamplerPath);
         diffuseTextureSampler.CreateIdAttr(pxr::VtValue(pxr::TfToken("UsdUVTexture")));
         diffuseTextureSampler.CreateInput(pxr::TfToken("file"), pxr::SdfValueTypeNames->Asset).Set(pxr::SdfAssetPath(textureFile));
-        diffuseTextureSampler.CreateInput(pxr::TfToken("st"), pxr::SdfValueTypeNames->Float2).ConnectToSource(stReader, pxr::TfToken("result"));
+        diffuseTextureSampler.CreateInput(pxr::TfToken("st"), pxr::SdfValueTypeNames->Float2).ConnectToSource(stReader.ConnectableAPI(), pxr::TfToken("result"));
 
         // this bit is important...by default it will use LINEAR_MIPMAP_LINEAR (for some reason usdview doesn't require this though), thanks RenderDoc :)
         diffuseTextureSampler.CreateInput(pxr::UsdHydraTokens->minFilter, pxr::SdfValueTypeNames->Token).Set(pxr::UsdHydraTokens->linear);
 
         // attach the output of the sampler to the pbr shader's diffuseColor
         diffuseTextureSampler.CreateOutput(pxr::TfToken("rgb"), pxr::SdfValueTypeNames->Float3);
-        pbrShader.CreateInput(pxr::TfToken("diffuseColor"), pxr::SdfValueTypeNames->Color3f).ConnectToSource(diffuseTextureSampler, pxr::TfToken("rgb"));
+        pbrShader.CreateInput(pxr::TfToken("diffuseColor"), pxr::SdfValueTypeNames->Color3f).ConnectToSource(diffuseTextureSampler.ConnectableAPI(), pxr::TfToken("rgb"));
 
         // connect everything together
         auto stInput = material.CreateInput(pxr::TfToken("frame:stPrimvarName"), pxr::SdfValueTypeNames->Token);
@@ -156,6 +157,20 @@ pxr::SdfLayerRefPtr cube(const std::string &primName, const std::string textureF
     cube[22] = pxr::GfVec3f(-1.f, -1.f, -1.f);
     cube[23] = pxr::GfVec3f(-1.f,  1.f, -1.f);
 
+    pxr::VtVec3fArray normals(24);
+    for (size_t i = 0; i < 24; i += 3)
+    {
+        glm::vec3 p0 = glm::vec3(cube[i + 0].data()[0], cube[i + 0].data()[1], cube[i + 0].data()[2]);
+        glm::vec3 p1 = glm::vec3(cube[i + 1].data()[0], cube[i + 1].data()[1], cube[i + 1].data()[2]);
+        glm::vec3 p2 = glm::vec3(cube[i + 2].data()[0], cube[i + 2].data()[1], cube[i + 2].data()[2]);
+
+        auto n = glm::cross(glm::normalize(p0 - p1), glm::normalize(p0 - p2));
+
+        normals[i + 0] = pxr::GfVec3f(n.x, n.y, n.z);
+        normals[i + 1] = pxr::GfVec3f(n.x, n.y, n.z);
+        normals[i + 2] = pxr::GfVec3f(n.x, n.y, n.z);
+    }
+
     // tex coords...if a texture was specified we'll need these
     pxr::VtVec2fArray texCoords(24);
     texCoords[ 0] = pxr::GfVec2f( 0.f,  0.f);
@@ -187,7 +202,7 @@ pxr::SdfLayerRefPtr cube(const std::string &primName, const std::string textureF
     auto layer = pxr::SdfLayer::CreateAnonymous(primName + ".usda");
     auto stage = pxr::UsdStage::Open(layer);
 
-    auto mesh = createMesh(stage, primName, cube, faceIndexCounts, faceIndices, texCoords);
+    auto mesh = createMesh(stage, primName, cube, faceIndexCounts, faceIndices, texCoords, normals);
     
     auto pbrShader = createPBRShader(stage, mesh, 0.4f, 0.f, textureFile);
 
@@ -229,7 +244,7 @@ int main(int argc, char **argv)
     }
     
     renderer.SetUsdStage(usdStage);
-    renderer.CreateWindow(800, 600);
+    renderer.CreateGLWindow(1280, 720);
     renderer.BeginRender();
 
     // save stage to file

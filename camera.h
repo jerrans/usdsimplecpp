@@ -22,6 +22,7 @@ public:
 	virtual glm::vec3 GetTarget() { return target; }
 	
     virtual void SetScreenDimensions(glm::vec4 screenDims) { screenDimensions = screenDims; }
+	virtual glm::vec4 GetScreenDimensions() { return screenDimensions; }
 	virtual glm::mat4 *GetViewMatrix() { return viewMatr; }
 	glm::vec2 GetMouseOnScreen(int clientX, int clientY);
 

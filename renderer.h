@@ -5,6 +5,7 @@
 
 #include <pxr/pxr.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/xform.h>
 #include <pxr/usd/usdGeom/sphere.h>
 #include <pxr/usd/usdGeom/mesh.h>
@@ -18,6 +19,8 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "camera.h"
+
+class Shader;
 
 // attach this as the user data pointer to the glfw callbacks
 struct WindowState
@@ -37,7 +40,7 @@ class GLRenderer
     GLRenderer();
     virtual ~GLRenderer();
 
-    virtual void CreateWindow(uint32_t width, uint32_t height);
+    virtual void CreateGLWindow(uint32_t width, uint32_t height);
     virtual void BeginRender();
     virtual void SetSceneBounds(glm::vec3 &sceneMin, glm::vec3 &sceneMax);
 
@@ -51,11 +54,7 @@ class GLRenderer
     }
     virtual glm::ivec2 GetExtent()
     {
-        return glm::ivec2(renderParams.renderResolution[0], renderParams.renderResolution[1]);
-    }
-    pxr::UsdImagingGLEngine *GetRenderEngine()
-    {
-        return engine;
+        return glm::ivec2(800, 600);
     }
     void SetUsdStage(pxr::UsdStageRefPtr stg)
     {
@@ -67,7 +66,8 @@ class GLRenderer
 
     // Usd
     pxr::UsdStageRefPtr stage;
-    pxr::UsdImagingGLEngine *engine;
+    pxr::UsdImagingGLEngine *primaryGraphicsEngine;
+    pxr::UsdImagingGLEngine *secondaryGraphicsEngine;
     pxr::UsdImagingGLRenderParams renderParams;
 
     Camera camera;
@@ -76,4 +76,9 @@ class GLRenderer
     glm::vec4 eye;
     glm::mat4 viewMatrix;
     glm::vec3 sceneBounds[2];
+
+    std::map<int, pxr::TfToken> rendererPlugins;
+    pxr::TfToken activeRendererPlugin;
+
+    std::shared_ptr<Shader> quadShader;
 };
