@@ -2,6 +2,11 @@
 #include "renderer.h"
 #include "shader.h"
 
+#include <pxr/imaging/hdx/hgiConversions.h>
+#include <pxr/imaging/hgi/blitCmds.h>
+#include <pxr/imaging/hgi/blitCmdsOps.h>
+#include <pxr/imaging/hgi/hgi.h>
+
 #include <iostream>
 
 #define PRIMARY_DEPTH_VIS 0
@@ -30,8 +35,9 @@ std::string s_fs =
 "   if(uv.y > 0.5){\n"
 #if SECONDARY_DEPTH_VIS
 "       float d = texture(secondary, uv).r;\n"
-"       d = (d + 1.0) / 2.0;\n"
+//"       d = (d + 1.0) / 2.0;\n"
 "       fragColor = vec4(d, d, d, 1.0);\n"
+"       return;\n"
 #else
 "       fragColor = texture(secondary, uv).rgba;\n"
 #endif
@@ -39,12 +45,13 @@ std::string s_fs =
 #if PRIMARY_DEPTH_VIS
 "       float d = texture(primary, uv).r;\n"
 "       fragColor = vec4(d, d, d, 1.0);\n"
+"       return;\n"
 #else
 "       fragColor = texture(primary, uv).rgba;\n"
 #endif
 "   }\n"
 "   vec4 overlay = texture(secondary, uv).rgba;\n"
-"   fragColor = overlay.r >= 1.0 ? texture(primary, uv).rgba : texture(secondary, uv).rgba;\n"
+"   fragColor = overlay.a == 0.0 ? texture(primary, uv).rgba : texture(secondary, uv).rgba;\n"
 "}\n";
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
@@ -186,14 +193,23 @@ void GLRenderer::CreateGLWindow(uint32_t width, uint32_t height)
         activeRendererPlugin = rendererPlugins[pluginIndex];
 
     // parameters for the GL renderer
-    this->renderParams.showRender = true;
-    this->renderParams.enableLighting = true;
-    this->renderParams.drawMode = pxr::UsdImagingGLDrawMode::DRAW_SHADED_SMOOTH;
-    this->renderParams.enableSceneMaterials = true;
-    this->renderParams.enableUsdDrawModes = true;
-    this->renderParams.cullStyle = pxr::UsdImagingGLCullStyle::CULL_STYLE_NOTHING;
-    this->renderParams.colorCorrectionMode = pxr::HdxColorCorrectionTokens->disabled;
-    this->renderParams.clearColor = pxr::GfVec4f(17.f / 255.f, 80.f / 255.f, 147.f / 255.f, 1.f);
+    this->primaryRenderParams.showRender = true;
+    this->primaryRenderParams.enableLighting = true;
+    this->primaryRenderParams.drawMode = pxr::UsdImagingGLDrawMode::DRAW_SHADED_SMOOTH;
+    this->primaryRenderParams.enableSceneMaterials = true;
+    this->primaryRenderParams.enableUsdDrawModes = true;
+    this->primaryRenderParams.cullStyle = pxr::UsdImagingGLCullStyle::CULL_STYLE_NOTHING;
+    this->primaryRenderParams.colorCorrectionMode = pxr::HdxColorCorrectionTokens->disabled;
+    this->primaryRenderParams.clearColor = pxr::GfVec4f(17.f / 255.f, 80.f / 255.f, 147.f / 255.f, 1.f);
+
+    this->secondaryRenderParams.showRender = true;
+    this->secondaryRenderParams.enableLighting = true;
+    this->secondaryRenderParams.drawMode = pxr::UsdImagingGLDrawMode::DRAW_WIREFRAME;
+    this->secondaryRenderParams.enableSceneMaterials = true;
+    this->secondaryRenderParams.enableUsdDrawModes = true;
+    this->secondaryRenderParams.cullStyle = pxr::UsdImagingGLCullStyle::CULL_STYLE_NOTHING;
+    this->secondaryRenderParams.colorCorrectionMode = pxr::HdxColorCorrectionTokens->disabled;
+    this->secondaryRenderParams.clearColor = pxr::GfVec4f(0.f, 0.f, 0.f, 0.f);
 
     // initialize glfw and create 4.5 core profile context
     glfwInit();
@@ -239,7 +255,7 @@ void GLRenderer::BeginRender()
     //primaryGraphicsEngine->SetRendererPlugin(activeRendererPlugin);
 
     secondaryGraphicsEngine = new pxr::UsdImagingGLEngine();
-    secondaryGraphicsEngine->SetRendererPlugin(rendererPlugins[3]);
+    secondaryGraphicsEngine->SetRendererPlugin(rendererPlugins[1]);
 
     static pxr::TfToken tokenDenoisingEnabled("OxideDenoiseEnabled");
     primaryGraphicsEngine->SetRendererSetting(tokenDenoisingEnabled, pxr::VtValue(false));
@@ -294,7 +310,7 @@ void GLRenderer::BeginRender()
     glEnable(GL_ALPHA);
     GLuint emptyVAO;
     glGenVertexArrays(1, &emptyVAO);
-    
+
     // render loop
     while( !glfwWindowShouldClose(window) )
     {
@@ -305,20 +321,20 @@ void GLRenderer::BeginRender()
         primaryGraphicsEngine->SetRendererAov(pxr::HdAovTokens->color);
         primaryGraphicsEngine->SetRenderViewport(pxr::GfVec4d(0, 0, windowDims.x, windowDims.y));
         primaryGraphicsEngine->SetWindowPolicy(pxr::CameraUtilConformWindowPolicy::CameraUtilFit);
-        primaryGraphicsEngine->Render(stage->GetPseudoRoot(), this->renderParams);
+        primaryGraphicsEngine->Render(stage->GetPseudoRoot(), this->primaryRenderParams);
+        
+        auto depthTexture = primaryGraphicsEngine->GetAovTexture(pxr::HdAovTokens->depth);
         
         secondaryGraphicsEngine->SetCameraState(makeMatrix(this->viewMatrix), makeMatrix(this->projectionMatrix));
         secondaryGraphicsEngine->SetRenderBufferSize(pxr::GfVec2i(windowDims.x, windowDims.y));
         secondaryGraphicsEngine->SetRendererAov(pxr::HdAovTokens->color);
         secondaryGraphicsEngine->SetRenderViewport(pxr::GfVec4d(0, 0, windowDims.x, windowDims.y));
         secondaryGraphicsEngine->SetWindowPolicy(pxr::CameraUtilConformWindowPolicy::CameraUtilFit);
+        secondaryGraphicsEngine->SetRendererSetting(pxr::TfToken("clearDepth"), pxr::VtValue(true));
 
-        auto depthTexture = primaryGraphicsEngine->GetAovTexture(pxr::HdAovTokens->depth);
         if (depthTexture)
-        {
             secondaryGraphicsEngine->PopulateAovTexture(pxr::HdAovTokens->depth, depthTexture);
-        }
-        secondaryGraphicsEngine->Render(stage->GetPseudoRoot(), this->renderParams);
+        secondaryGraphicsEngine->Render(stage->GetPseudoRoot(), this->secondaryRenderParams);
 
         glViewport(0, 0, windowDims.x, windowDims.y);
         glClearColor(17.f / 255.f, 80.f / 255.f, 147.f / 255.f, 1.f);

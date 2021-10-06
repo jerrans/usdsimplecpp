@@ -68,7 +68,8 @@ class GLRenderer
     pxr::UsdStageRefPtr stage;
     pxr::UsdImagingGLEngine *primaryGraphicsEngine;
     pxr::UsdImagingGLEngine *secondaryGraphicsEngine;
-    pxr::UsdImagingGLRenderParams renderParams;
+    pxr::UsdImagingGLRenderParams primaryRenderParams;
+    pxr::UsdImagingGLRenderParams secondaryRenderParams;
 
     Camera camera;
 
